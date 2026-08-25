@@ -15,9 +15,13 @@ import { journey } from "@/data/journey";
 export default function Home() {
   const [stage, setStage] = useState("password"); // password -> countdown -> journey
   const [journeyIndex, setJourneyIndex] = useState(0);
+  const [musicStatus, setMusicStatus] = useState("Loading");
   const videoRef = useRef(null);
+  const bgMusicRef = useRef(null);
+  const prevIsVideoStage = useRef(false);
 
   function handleUnlock() {
+    console.log("[MUSIC] Unlock clicked");
     // Prime the <video> element for autoplay-with-sound
     const el = videoRef.current;
     if (el) {
@@ -29,6 +33,19 @@ export default function Home() {
         })
         .catch(() => {});
     }
+
+    if (bgMusicRef.current) {
+      console.log("[MUSIC] Audio source:", bgMusicRef.current.src);
+      console.log("[MUSIC] Attempting playback");
+      bgMusicRef.current.play().then(() => {
+        console.log("[MUSIC] Playback started");
+        setMusicStatus("Playing");
+      }).catch(err => {
+        console.error("[MUSIC] Playback failed:", err);
+        setMusicStatus("Error: " + err.message);
+      });
+    }
+
     setStage("countdown");
   }
 
@@ -110,8 +127,92 @@ export default function Home() {
   const currentJourneyPage = journey[journeyIndex];
   const isVideoStage = stage === "journey" && currentJourneyPage?.type === "video";
 
+  // Initialize background music and click sound
+  useEffect(() => {
+    const audio = new Audio('/music/music.mp3');
+    audio.loop = true;
+    audio.volume = 0.5;
+    bgMusicRef.current = audio;
+    setMusicStatus("Ready");
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    let audioCtx = null;
+    
+    try {
+      audioCtx = new AudioContextClass();
+    } catch (e) {
+      console.warn("Web Audio API not supported", e);
+    }
+
+    const playClick = () => {
+      if (!audioCtx) return;
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
+      try {
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+        oscillator.frequency.exponentialRampToValueAtTime(300, audioCtx.currentTime + 0.05);
+        
+        gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + 0.05);
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    const handleClick = (e) => {
+      if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+        playClick();
+      }
+    };
+
+    document.addEventListener('click', handleClick);
+
+    return () => {
+      audio.pause();
+      document.removeEventListener('click', handleClick);
+      if (audioCtx) {
+        audioCtx.close().catch(() => {});
+      }
+    };
+  }, []);
+
+  // Manage background music pausing/resuming during video
+  useEffect(() => {
+    if (!bgMusicRef.current) return;
+
+    if (isVideoStage && !prevIsVideoStage.current) {
+      console.log("[MUSIC] Paused for video");
+      bgMusicRef.current.pause();
+      setMusicStatus("Paused");
+    } else if (!isVideoStage && prevIsVideoStage.current) {
+      console.log("[MUSIC] Resuming after video");
+      bgMusicRef.current.play().then(() => {
+        console.log("[MUSIC] Playback resumed");
+        setMusicStatus("Playing");
+      }).catch(err => {
+        console.error("[MUSIC] Resume failed:", err);
+        setMusicStatus("Error: " + err.message);
+      });
+    }
+    prevIsVideoStage.current = isVideoStage;
+  }, [isVideoStage]);
+
   return (
     <main className="app-shell">
+      <div style={{ position: 'fixed', top: 10, left: 10, zIndex: 9999, fontSize: '10px', color: '#0f0', background: '#000', padding: '4px', borderRadius: '4px' }}>
+        Music: {musicStatus}
+      </div>
       <AmbientBackground />
 
       {stage === "journey" && journeyIndex >= 0 && (
